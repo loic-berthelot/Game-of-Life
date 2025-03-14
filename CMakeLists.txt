@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.10)
+project(GameOfLife)
+set(CMAKE_CXX_STANDARD 20)
+find_package(SFML REQUIRED COMPONENTS graphics window system)
+include_directories(../src ../include ../lib)
+file(GLOB SOURCES "src/main.cpp")
+add_executable(GameOfLife ${SOURCES})
+target_link_libraries(GameOfLife sfml-graphics sfml-window sfml-system)

@@ -3,73 +3,105 @@
 #include <stdlib.h>
 #include <time.h>
 #include <vector>
+#include <cmath>
 using namespace std;
 using namespace sf;
 
+enum class GameModes {
+	Gol,
+	Parity,
+	ModuloSum3,
+	ModuloSum4,
+	ModuloCount,
+	GolEnclosure,
+	Maze,
+	Battle,
+	Wave,
+	Gol2,
+	Gol3,
+	MazeGenerator
+};
 
-/**
-* This project offers variations on Jonh Conway's Game of Life.
-* ---CONTROLS---
-* left click : draw
-* right click : gum
-* space key : pause/restart
-* R : reset
-* 1, 2, 3, 4, 5 : select a color
-* F1, F2, F3 : change speed
-*/
-
-//---PARAMETERS---
-string game_mode = "gol";
- // Choose a value in :	gol, parity0, parity1, moduloSum, moduloCount, golEnclosure, maze, battle, wave, gol2
-bool circular_world = true;
- //Mettre false pour que les cellules en bord de terrain n'interagissent plus avec celles du bord opposé
-
-
-
-
-
-
-
-
-
-
+//USER PARAMETERS
+GameModes game_mode = GameModes::Gol; // choose a value in GameModes
+bool circular_world = true; //when circular_world is set to true, cells considers cells from the other side (on x and y axis) of the world as neighbors
 
 RenderWindow window;
 Vector2i window_size(VideoMode::getDesktopMode().width, VideoMode::getDesktopMode().height);
-const int g_width = 50;
+const int g_width = 56;
 const int g_height = 40;
-Vector2f rect_size((window_size.x - 300) / (g_width * 1.2), (window_size.y - 200) / (g_height * 1.2));
+Vector2f rect_size((window_size.x - 300) / g_width, (window_size.y - 200) / g_height);
 using line = int[g_width];
 using grid = line[g_height];
 grid game_grid;
 using colors = Color[6];
-colors all_colors = { Color::White, Color::Blue, Color::Cyan, Color::Green, Color::Magenta, Color::Red };
+colors all_colors = { Color::Black, Color::Blue, Color(100,170,255), Color::Green, Color::Magenta, Color::Red };
 bool is_paused = true;
 bool key_space = false;
 int frame_number = 0;
+int frame_evolution = 0;
 int dtime = 20;
 int color_left = 1;
+bool eKeyPressed = false;
+Vector2i worldCorner = Vector2i(300, 100);
+std::vector<std::string> instructions = {
+"CONTROLS :",
+	"",
+"left click : draw",
+"right click : gum",
+"space : pause/restart",
+"R : reset",
+"E : evolve 1 time",
+"1,2,3,4,5 : select a color",
+"F1, F2, F3 : change speed"
+};
+sf::Font font;
+RectangleShape pause_logo;
+sf::Text evolutionFrameText;
+sf::Text instructionsText;
 
 #pragma region utils
+int mod(int a, int b) {
+	while (a < 0) a += b;
+	return a % b;
+}
 void display() {
+	RectangleShape bgSquare;
+	bgSquare.setSize(Vector2f(2+rect_size.x*g_width, 2+rect_size.y*g_height));
+	bgSquare.setFillColor(Color(50, 50, 50));
+	bgSquare.setOutlineColor(Color::White);
+	bgSquare.setOutlineThickness(1);
+	bgSquare.setPosition(Vector2f(worldCorner.x, worldCorner.y));
+	window.draw(bgSquare);
+	window.draw(evolutionFrameText);
+	for (int i = 0; i < instructions.size(); ++i) {
+		instructionsText.setString(instructions[i]);
+		instructionsText.setPosition(Vector2f(20, 100+i*30));
+		window.draw(instructionsText);
+	}
+
 	RectangleShape square;
-	square.setSize(rect_size);
+	square.setSize(Vector2f(0.9*rect_size.x, 0.9*rect_size.y));
 	for (int j = 0; j < g_height; j++) {
 		for (int i = 0; i < g_width; i++) {
-			square.setPosition(Vector2f(200+1.2*rect_size.x*i, 100+1.2* rect_size.y*j));
+			square.setPosition(Vector2f(worldCorner.x+rect_size.x*i, worldCorner.y+rect_size.y*j));
 			square.setFillColor(all_colors[game_grid[j][i]]);
 			window.draw(square);
 		}
 	}
 }
-void initialize(string mode = "default") {
+void initialize(bool random = false) {
+	frame_evolution = 0;
 	for (int j = 0; j < g_height; j++) {
-		if (mode == "random") for (int i = 0; i < g_width; i++) game_grid[j][i] = rand() % 2;
-		else if (mode == "middle") {
-			for (int i = 0; i < g_width; i++) game_grid[j][i] = 0;
-			game_grid[(int) floor(g_height / 2)][(int) floor(g_width / 2)] = 1;
+		if (random) {
+			for (int i = 0; i < g_width; i++) {
+				game_grid[j][i] = rand() % 2;
+			}
+		} else {
+			for (int i = 0; i < g_width; i++) {
+				game_grid[j][i] = 0;
+			}
 		}
-		else for (int i = 0; i < g_width; i++) game_grid[j][i] = 0;
 	}
 }
 void initialize(grid & g) {
@@ -79,7 +111,7 @@ void initialize(grid & g) {
 }
 void update() {
 	Vector2i mouse_pos = Mouse::getPosition(window);
-	Vector2i index = Vector2i(floor((mouse_pos.x - 200) / 1.2 / rect_size.x), floor((mouse_pos.y - 100) / 1.2 / rect_size.y));
+	Vector2i index = Vector2i(floor((mouse_pos.x - worldCorner.x)  / rect_size.x), floor((mouse_pos.y - worldCorner.y) / rect_size.y));
 	if (index.x < 0 or index.y < 0 or index.x > g_width or index.y > g_height) return;
 	if (Mouse::isButtonPressed(Mouse::Left)) game_grid[index.y][index.x] = color_left;
 	if (Mouse::isButtonPressed(Mouse::Right)) game_grid[index.y][index.x] = 0;
@@ -89,7 +121,9 @@ vector<int> getNeighbors(int x, int y) {
 	for (int j = -1; j <= 1; j++) {
 		for (int i = -1; i <= 1; i++) {
 			if (i != 0 or j != 0) {
-				if (circular_world) vect.push_back(game_grid[(y + j) % g_height][(x + i) % g_width]);
+				if (circular_world) {
+					vect.push_back(game_grid[mod(y + j, g_height)][mod(x + i, g_width)]);
+				}
 				else if (x + i >= 0 and x + i < g_width and y + j >= 0 and y + j < g_height) vect.push_back(game_grid[y + j][x + i]);
 			}
 		}
@@ -101,7 +135,7 @@ vector<int> get4Neighbors(int x, int y) {
 	for (int j = -1; j <= 1; j++) {
 		for (int i = -1; i <= 1; i++) {
 			if (abs((i+j))%2 == 1) {
-				if (circular_world) vect.push_back(game_grid[(y + j) % g_height][(x + i) % g_width]);
+				if (circular_world) vect.push_back(game_grid[mod(y + j, g_height)][mod(x + i, g_width)]);
 				else if (x + i >= 0 and x + i < g_width and y + j >= 0 and y + j < g_height) vect.push_back(game_grid[y + j][x + i]);
 			}
 		}
@@ -148,7 +182,7 @@ int minNeighbors(int x, int y) {
 	}
 	return count;
 }
-void copyGrid(grid & g) {
+void copyGrid(const grid & g) {
 	for (int j = 0; j < g_height; j++) {
 		for (int i = 0; i < g_width; i++) {
 			game_grid[j][i] = g[j][i];
@@ -172,22 +206,6 @@ void gol() {
 				else g[j][i] = 0;
 			}
 		}
-	}
-	copyGrid(g);
-}
-
-void parity0() {
-	grid g;
-	for (int j = 0; j < g_height; j++) {
-		for (int i = 0; i < g_width; i++) g[j][i] = 1-sumNeighbors(i, j) % 2;
-	}
-	copyGrid(g);
-}
-
-void parity1() {
-	grid g;
-	for (int j = 0; j < g_height; j++) {
-		for (int i = 0; i < g_width; i++) g[j][i] = sumNeighbors(i, j) % 2;
 	}
 	copyGrid(g);
 }
@@ -232,7 +250,6 @@ void golEnclosure() {
 
 void maze() {
 	grid g;
-	int neighbors_number;
 	for (int j = 0; j < g_height; j++) {
 		for (int i = 0; i < g_width; i++) {
 			if (game_grid[j][i] == 0) {
@@ -252,7 +269,6 @@ void maze() {
 
 void battle() {
 	grid g;
-	int neighbors_number;
 	for (int j = 0; j < g_height; j++) {
 		for (int i = 0; i < g_width; i++) {
 			if (game_grid[j][i] == 0 or game_grid[j][i] == 1 or game_grid[j][i] == 5) {
@@ -339,18 +355,47 @@ void mazeGenerator() {
 }
 
 void evolve() {
-	if (game_mode == "parity0") parity0();
-	else if (game_mode == "parity1") parity1();
-	else if (game_mode == "moduloSum") moduloSum(6);
-	else if (game_mode == "moduloCount") moduloCount(6);
-	else if (game_mode == "golEnclosure") golEnclosure();
-	else if (game_mode == "maze") maze();
-	else if (game_mode == "battle") battle();
-	else if (game_mode == "wave") wave();
-	else if (game_mode == "gol2") gol2();
-	else if (game_mode == "gol3") gol3();
-	else if (game_mode == "mazeGenerator") mazeGenerator();
-	else gol();
+	switch (game_mode) {
+		case GameModes::Gol :
+			gol();
+		break;
+		case GameModes::Parity :
+			moduloSum(2);
+		break;
+		case GameModes::ModuloSum3 :
+			moduloSum(3);
+		break;
+		case GameModes::ModuloSum4 :
+			moduloSum(4);
+		break;
+		case GameModes::ModuloCount :
+			moduloSum(4);
+		break;
+		case GameModes::GolEnclosure :
+			moduloSum(4);
+		break;
+		case GameModes::Maze :
+			moduloSum(4);
+		break;
+		case GameModes::Battle :
+			moduloSum(4);
+		break;
+		case GameModes::Wave :
+			moduloSum(4);
+		break;
+		case GameModes::Gol2 :
+			moduloSum(4);
+		break;
+		case GameModes::Gol3 :
+			moduloSum(4);
+		break;
+		case GameModes::MazeGenerator :
+			moduloSum(4);
+		break;
+		default:
+			gol();
+	}
+	frame_evolution++;
 }
 
 void inputs() {
@@ -361,7 +406,13 @@ void inputs() {
 		}
 	}
 	else key_space = false;
-	if(Keyboard::isKeyPressed(Keyboard::R)) initialize("middle");
+	if(Keyboard::isKeyPressed(Keyboard::R)) initialize();
+	if(Keyboard::isKeyPressed(Keyboard::E)) {
+		if (! eKeyPressed) evolve();
+		eKeyPressed = true;
+	} else {
+		eKeyPressed = false;
+	}
 	if (Keyboard::isKeyPressed(Keyboard::Num1)) color_left = 1;
 	if (Keyboard::isKeyPressed(Keyboard::Num2)) color_left = 2;
 	if (Keyboard::isKeyPressed(Keyboard::Num3)) color_left = 3;
@@ -372,26 +423,44 @@ void inputs() {
 	if (Keyboard::isKeyPressed(Keyboard::F3)) dtime = 30;
 }
 
-int main() {
-	srand(time(0));
+void initWindow() {
 	window.create(VideoMode(window_size.x, window_size.y), "Game of Life");
 	window.setPosition(Vector2i(0, 0));
 	window.setFramerateLimit(60);
-	RectangleShape pause_logo; pause_logo.setFillColor(Color::Red); pause_logo.setSize(Vector2f(30, 30)); pause_logo.setOrigin(Vector2f(15, 15)); pause_logo.setPosition(Vector2f(30, 30));
+	pause_logo.setFillColor(Color::Red);
+	pause_logo.setSize(Vector2f(30, 30));
+	pause_logo.setOrigin(Vector2f(15, 15));
+	pause_logo.setPosition(Vector2f(30, 30));
+	if (!font.loadFromFile("../resources/fonts/arial.TTF")) {
+		std::cerr << "Error when loading the font\n";
+	}
+	evolutionFrameText.setFont(font);
+	evolutionFrameText.setCharacterSize(20);
+	evolutionFrameText.setFillColor(sf::Color::White);
+	evolutionFrameText.setPosition(100, 20);
+	instructionsText.setFont(font);
+	instructionsText.setCharacterSize(20);
+	instructionsText.setFillColor(sf::Color::White);
+}
+
+int main() {
+	srand(time(0));
+	initWindow();
 	grid g;
-	initialize("middle");
+	initialize();
 	while (window.isOpen()) {
-		frame_number++;
-		window.clear();
+		window.clear(Color::Black);
 		update();
 		inputs();
 		pause_logo.setFillColor(all_colors[color_left]);
 		if (is_paused) pause_logo.setRotation(0);
 		else {
+			frame_number++;
 			pause_logo.setRotation(45);
 			if (frame_number % dtime == 0) evolve();
 		}
 		window.draw(pause_logo);
+		evolutionFrameText.setString(std::to_string(frame_evolution));
 		display();
 		window.display();
 		Event event;
