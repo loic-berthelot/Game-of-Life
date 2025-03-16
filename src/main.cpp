@@ -4,6 +4,8 @@
 #include <time.h>
 #include <vector>
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 using namespace std;
 using namespace sf;
 
@@ -21,16 +23,15 @@ enum class GameModes {
 	Gol3,
 	MazeGenerator
 };
+int gameModesLength = 12;
 
-//USER PARAMETERS
-GameModes game_mode = GameModes::Gol; // choose a value in GameModes
-bool circular_world = true; //when circular_world is set to true, cells considers cells from the other side (on x and y axis) of the world as neighbors
-
+GameModes game_mode = GameModes::Gol;
+bool circularWorld = true;
 RenderWindow window;
 Vector2i window_size(VideoMode::getDesktopMode().width, VideoMode::getDesktopMode().height);
 const int g_width = 56;
 const int g_height = 40;
-Vector2f rect_size((window_size.x - 300) / g_width, (window_size.y - 200) / g_height);
+Vector2f rectSize((window_size.x - 300) / g_width, (window_size.y - 200) / g_height);
 using line = int[g_width];
 using grid = line[g_height];
 grid game_grid;
@@ -38,60 +39,115 @@ using colors = Color[6];
 colors all_colors = { Color::Black, Color::Blue, Color(100,170,255), Color::Green, Color::Magenta, Color::Red };
 bool is_paused = true;
 bool key_space = false;
-int frame_number = 0;
-int frame_evolution = 0;
-int dtime = 20;
+int frameNumber = 0;
+int frameEvolution = 0;
+int deltaTime = 16;
 int color_left = 1;
 bool eKeyPressed = false;
+bool cKeyPressed = false;
+bool arrowKeysPressed = false;
+bool speedKeysPressed = false;
 Vector2i worldCorner = Vector2i(300, 100);
 std::vector<std::string> instructions = {
 "CONTROLS :",
 	"",
-"left click : draw",
-"right click : gum",
+"mouse left : draw",
+"mouse right : gum",
 "space : pause/restart",
 "R : reset",
+"F : fill the world",
 "E : evolve 1 time",
+"C : circular world",
 "1,2,3,4,5 : select a color",
-"F1, F2, F3 : change speed"
+"-, + : change speed",
+"arrow keys : change mode"
 };
 sf::Font font;
 RectangleShape pause_logo;
 sf::Text evolutionFrameText;
 sf::Text instructionsText;
+sf::Text gameModeText;
+sf::Text speedText;
+sf::Text circularWorldText;
 
 #pragma region utils
 int mod(int a, int b) {
 	while (a < 0) a += b;
 	return a % b;
 }
+std::string getGameModeString() {
+	std::string text = "["+std::to_string((int)game_mode)+"] ";
+	switch (game_mode) {
+		case GameModes::Gol:
+			text += "Original Game of Life";
+		break;
+		case GameModes::Parity :
+			text += "Parity (cells are alive if and only if they have an odd number of alive neighbors)";
+		break;
+		case GameModes::ModuloSum3 :
+			text += "Modulo Sum 3 (cells color is the number of neighbors modulo 3)";
+		break;
+		case GameModes::ModuloSum4 :
+			text += "Modulo Sum 4 (cells color is the number of neighbors modulo 4)";
+		break;
+		case GameModes::ModuloCount :
+			text += "ModuloCount (cells are alive is neighbors_number % 5 >= 3)";
+		break;
+		case GameModes::GolEnclosure :
+			text += "Game of life enclosure : place green barriers of cells to stop blue cells";
+		break;
+		case GameModes::Maze :
+			text += "Maze : Place blue cells touching light blue cells in a maze made of green cells";
+		break;
+		case GameModes::Battle :
+			text += "Battle between blue and red cells";
+		break;
+		case GameModes::Wave :
+			text += "Wave";
+		break;
+		case GameModes::Gol2 :
+			text += "Game of life with blue and red cells";
+		break;
+		case GameModes::Gol3 :
+			text += "Red eats Green, Green eats Blue, Blue eats Red (place groups of several cells to see an evolution)";
+		break;
+		case GameModes::MazeGenerator :
+			text += "Maze generator";
+		break;
+	}
+	return text;
+}
 void display() {
 	RectangleShape bgSquare;
-	bgSquare.setSize(Vector2f(2+rect_size.x*g_width, 2+rect_size.y*g_height));
+	bgSquare.setSize(Vector2f(2+rectSize.x*g_width, 2+rectSize.y*g_height));
 	bgSquare.setFillColor(Color(50, 50, 50));
 	bgSquare.setOutlineColor(Color::White);
 	bgSquare.setOutlineThickness(1);
 	bgSquare.setPosition(Vector2f(worldCorner.x, worldCorner.y));
 	window.draw(bgSquare);
 	window.draw(evolutionFrameText);
+	window.draw(speedText);
+	window.draw(circularWorldText);
+	gameModeText.setString(getGameModeString());
+	window.draw(gameModeText);
 	for (int i = 0; i < instructions.size(); ++i) {
 		instructionsText.setString(instructions[i]);
-		instructionsText.setPosition(Vector2f(20, 100+i*30));
+		instructionsText.setPosition(Vector2f(20, 160+i*30));
 		window.draw(instructionsText);
 	}
 
 	RectangleShape square;
-	square.setSize(Vector2f(0.9*rect_size.x, 0.9*rect_size.y));
+	square.setSize(Vector2f(0.9*rectSize.x, 0.9*rectSize.y));
 	for (int j = 0; j < g_height; j++) {
 		for (int i = 0; i < g_width; i++) {
-			square.setPosition(Vector2f(worldCorner.x+rect_size.x*i, worldCorner.y+rect_size.y*j));
+			square.setPosition(Vector2f(worldCorner.x+rectSize.x*i, worldCorner.y+rectSize.y*j));
 			square.setFillColor(all_colors[game_grid[j][i]]);
 			window.draw(square);
 		}
 	}
 }
 void initialize(bool random = false) {
-	frame_evolution = 0;
+	frameEvolution = 0;
 	for (int j = 0; j < g_height; j++) {
 		if (random) {
 			for (int i = 0; i < g_width; i++) {
@@ -104,14 +160,14 @@ void initialize(bool random = false) {
 		}
 	}
 }
-void initialize(grid & g) {
+void fill() {
 	for (int j = 0; j < g_height; j++) {
-		for (int i = 0; i < g_width; i++) g[j][i] = 0;
+		for (int i = 0; i < g_width; i++) game_grid[j][i] = color_left;
 	}
 }
 void update() {
-	Vector2i mouse_pos = Mouse::getPosition(window);
-	Vector2i index = Vector2i(floor((mouse_pos.x - worldCorner.x)  / rect_size.x), floor((mouse_pos.y - worldCorner.y) / rect_size.y));
+	Vector2i mousePos = Mouse::getPosition(window);
+	Vector2i index = Vector2i(floor((mousePos.x - worldCorner.x)  / rectSize.x), floor((mousePos.y - worldCorner.y) / rectSize.y));
 	if (index.x < 0 or index.y < 0 or index.x > g_width or index.y > g_height) return;
 	if (Mouse::isButtonPressed(Mouse::Left)) game_grid[index.y][index.x] = color_left;
 	if (Mouse::isButtonPressed(Mouse::Right)) game_grid[index.y][index.x] = 0;
@@ -121,7 +177,7 @@ vector<int> getNeighbors(int x, int y) {
 	for (int j = -1; j <= 1; j++) {
 		for (int i = -1; i <= 1; i++) {
 			if (i != 0 or j != 0) {
-				if (circular_world) {
+				if (circularWorld) {
 					vect.push_back(game_grid[mod(y + j, g_height)][mod(x + i, g_width)]);
 				}
 				else if (x + i >= 0 and x + i < g_width and y + j >= 0 and y + j < g_height) vect.push_back(game_grid[y + j][x + i]);
@@ -135,7 +191,7 @@ vector<int> get4Neighbors(int x, int y) {
 	for (int j = -1; j <= 1; j++) {
 		for (int i = -1; i <= 1; i++) {
 			if (abs((i+j))%2 == 1) {
-				if (circular_world) vect.push_back(game_grid[mod(y + j, g_height)][mod(x + i, g_width)]);
+				if (circularWorld) vect.push_back(game_grid[mod(y + j, g_height)][mod(x + i, g_width)]);
 				else if (x + i >= 0 and x + i < g_width and y + j >= 0 and y + j < g_height) vect.push_back(game_grid[y + j][x + i]);
 			}
 		}
@@ -218,10 +274,10 @@ void moduloSum(int m) {
 	copyGrid(g);
 }
 
-void moduloCount(int m) {
+void moduloCount(int m, int n=1) {
 	grid g;
 	for (int j = 0; j < g_height; j++) {
-		for (int i = 0; i < g_width; i++) g[j][i] = 2*countNeighbors(i, j, 1, 100) % m;
+		for (int i = 0; i < g_width; i++) g[j][i] = (countNeighbors(i, j, 1, 100) % m) >= n ? 1 : 0;
 	}
 	copyGrid(g);
 }
@@ -369,33 +425,33 @@ void evolve() {
 			moduloSum(4);
 		break;
 		case GameModes::ModuloCount :
-			moduloSum(4);
+			moduloCount(5, 3);
 		break;
 		case GameModes::GolEnclosure :
-			moduloSum(4);
+			golEnclosure();
 		break;
 		case GameModes::Maze :
-			moduloSum(4);
+			maze();
 		break;
 		case GameModes::Battle :
-			moduloSum(4);
+			battle();
 		break;
 		case GameModes::Wave :
-			moduloSum(4);
+			wave();
 		break;
 		case GameModes::Gol2 :
-			moduloSum(4);
+			gol2();
 		break;
 		case GameModes::Gol3 :
-			moduloSum(4);
+			gol3();
 		break;
 		case GameModes::MazeGenerator :
-			moduloSum(4);
+			mazeGenerator();
 		break;
 		default:
 			gol();
 	}
-	frame_evolution++;
+	frameEvolution++;
 }
 
 void inputs() {
@@ -406,21 +462,61 @@ void inputs() {
 		}
 	}
 	else key_space = false;
+	if(Keyboard::isKeyPressed(Keyboard::C)) {
+		if (! cKeyPressed) {
+			circularWorld = !circularWorld;
+			if (circularWorld) circularWorldText.setString("Circular World : enabled");
+			else circularWorldText.setString("Circular World : disabled");
+		}
+		cKeyPressed = true;
+	} else {
+		cKeyPressed = false;
+	}
 	if(Keyboard::isKeyPressed(Keyboard::R)) initialize();
-	if(Keyboard::isKeyPressed(Keyboard::E)) {
+	else if(Keyboard::isKeyPressed(Keyboard::F)) fill();
+	else if(Keyboard::isKeyPressed(Keyboard::E)) {
 		if (! eKeyPressed) evolve();
 		eKeyPressed = true;
 	} else {
 		eKeyPressed = false;
 	}
-	if (Keyboard::isKeyPressed(Keyboard::Num1)) color_left = 1;
-	if (Keyboard::isKeyPressed(Keyboard::Num2)) color_left = 2;
-	if (Keyboard::isKeyPressed(Keyboard::Num3)) color_left = 3;
-	if (Keyboard::isKeyPressed(Keyboard::Num4)) color_left = 4;
-	if (Keyboard::isKeyPressed(Keyboard::Num5)) color_left = 5;
-	if (Keyboard::isKeyPressed(Keyboard::F1)) dtime = 2;
-	if (Keyboard::isKeyPressed(Keyboard::F2)) dtime = 10;
-	if (Keyboard::isKeyPressed(Keyboard::F3)) dtime = 30;
+	if (Keyboard::isKeyPressed(Keyboard::Num1) || Keyboard::isKeyPressed(Keyboard::Numpad1)) color_left = 1;
+	else if (Keyboard::isKeyPressed(Keyboard::Num2) || Keyboard::isKeyPressed(Keyboard::Numpad2)) color_left = 2;
+	else if (Keyboard::isKeyPressed(Keyboard::Num3) || Keyboard::isKeyPressed(Keyboard::Numpad3)) color_left = 3;
+	else if (Keyboard::isKeyPressed(Keyboard::Num4) || Keyboard::isKeyPressed(Keyboard::Numpad4)) color_left = 4;
+	else if (Keyboard::isKeyPressed(Keyboard::Num5) || Keyboard::isKeyPressed(Keyboard::Numpad5)) color_left = 5;
+	if (Keyboard::isKeyPressed(Keyboard::Add)) {
+		if (!speedKeysPressed) deltaTime = (int) deltaTime/2;
+		if (deltaTime < 1) deltaTime = 1;
+		std:: ostringstream oss;
+		oss << std::setprecision(3) << (16.0/deltaTime);
+		speedText.setString("x"+oss.str());
+		speedKeysPressed = true;
+	} else if (Keyboard::isKeyPressed(Keyboard::Subtract)) {
+		if (!speedKeysPressed) deltaTime = deltaTime*2;
+		if (deltaTime > 128) deltaTime = 128;
+		std:: ostringstream oss;
+		oss << std::setprecision(3) << (16.0/deltaTime);
+		speedText.setString("x"+oss.str());
+		speedKeysPressed = true;
+	} else {
+		speedKeysPressed = false;
+	}
+	if (Keyboard::isKeyPressed(Keyboard::Left)) {
+		if ((int) game_mode > 0 && !arrowKeysPressed) game_mode = static_cast<GameModes> ((int) game_mode - 1);
+		arrowKeysPressed = true;
+	} else if (Keyboard::isKeyPressed(Keyboard::Right)) {
+		if ((int) game_mode < gameModesLength-1 && !arrowKeysPressed) game_mode = static_cast<GameModes> ((int) game_mode + 1);
+		arrowKeysPressed = true;
+	} else if (Keyboard::isKeyPressed(Keyboard::Up)) {
+		 if (!arrowKeysPressed) game_mode = static_cast<GameModes> (gameModesLength-1);
+		arrowKeysPressed = true;
+	} else if (Keyboard::isKeyPressed(Keyboard::Down)) {
+		if (!arrowKeysPressed) game_mode = static_cast<GameModes>(0);
+		arrowKeysPressed = true;
+	} else {
+		arrowKeysPressed = false;
+	}
 }
 
 void initWindow() {
@@ -437,10 +533,24 @@ void initWindow() {
 	evolutionFrameText.setFont(font);
 	evolutionFrameText.setCharacterSize(20);
 	evolutionFrameText.setFillColor(sf::Color::White);
-	evolutionFrameText.setPosition(100, 20);
+	evolutionFrameText.setPosition(425, 65);
 	instructionsText.setFont(font);
 	instructionsText.setCharacterSize(20);
 	instructionsText.setFillColor(sf::Color::White);
+	gameModeText.setColor(Color::White);
+	gameModeText.setFont(font);
+	gameModeText.setCharacterSize(20);
+	gameModeText.setPosition(Vector2f(425, 20));
+	speedText.setColor(Color::White);
+	speedText.setFont(font);
+	speedText.setCharacterSize(20);
+	speedText.setPosition(Vector2f(80, 20));
+	speedText.setString("x"+std::to_string((int) 16/deltaTime));
+	circularWorldText.setColor(Color::White);
+	circularWorldText.setFont(font);
+	circularWorldText.setCharacterSize(20);
+	circularWorldText.setPosition(Vector2f(20, 65));
+	circularWorldText.setString("Circular World : enabled");
 }
 
 int main() {
@@ -455,12 +565,12 @@ int main() {
 		pause_logo.setFillColor(all_colors[color_left]);
 		if (is_paused) pause_logo.setRotation(0);
 		else {
-			frame_number++;
+			frameNumber++;
 			pause_logo.setRotation(45);
-			if (frame_number % dtime == 0) evolve();
+			if (frameNumber % deltaTime == 0) evolve();
 		}
 		window.draw(pause_logo);
-		evolutionFrameText.setString(std::to_string(frame_evolution));
+		evolutionFrameText.setString("frame : "+std::to_string(frameEvolution));
 		display();
 		window.display();
 		Event event;
